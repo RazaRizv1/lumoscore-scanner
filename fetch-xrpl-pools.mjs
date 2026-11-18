@@ -37,7 +37,15 @@ while (n <= total) {
     console.log(`time cap: stopped at page ${n} of ${total} with ${pools.length} pools; the next run continues`);
     process.exit(0);
   }
-  const d = await page(n);
+  let d;
+  try { d = await page(n); }
+  catch (e) {
+    // REFUSED FOR GOOD THIS RUN (seen at page 264 after ~2 hours of steady paging): keep what we have and stop calmly,
+    // so the next run continues from here instead of the job failing.
+    fs.writeFileSync(PROG, JSON.stringify({ at: resume ? prev.at : t0, next: n, pools }));
+    console.log(`${e.message}; stopped at page ${n} with ${pools.length} pools, the next run continues`);
+    process.exit(0);
+  }
   total = +d.totalPages || 1;
   for (const p of d.pools || []) {
     const L = p.currentLiquidity || {};
