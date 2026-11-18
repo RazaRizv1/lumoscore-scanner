@@ -1,6 +1,6 @@
 name: scan
 
-# Every 30 minutes: refresh the Stellar pools and order books, search for loops, and publish the shortlist to the
+# Every 30 minutes: refresh Stellar, XRP Ledger and NEAR pools and order books, search for loops, and publish the shortlists to the
 # `shortlist` branch (overwritten each run, so the repository does not grow). The LumosCore MCP reads that file and
 # re-checks every candidate LIVE before reporting anything; this list only says where to look.
 on:
@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  stellar:
+  scan:
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -49,6 +49,20 @@ jobs:
       - name: Build the shortlist
         run: node shortlist.mjs
 
+      # XRP Ledger: the AMM list (~330 pages from xrpl.to's public API) at most every 3 hours; order books every run.
+      - name: XRP Ledger pools (every 3 hours)
+        continue-on-error: true
+        run: |
+          if [ ! -s data/xrpl-pools.json ] || [ $(( $(date +%s) - $(stat -c %Y data/xrpl-pools.json) )) -gt 10800 ]; then node fetch-xrpl-pools.mjs; else echo "xrpl pools are fresh"; fi
+
+      - name: Build the XRP Ledger shortlist
+        continue-on-error: true
+        run: rm -f data/xrpl-books.json && node shortlist-xrpl.mjs
+
+      - name: Build the NEAR shortlist
+        continue-on-error: true
+        run: node shortlist-near.mjs
+
       - name: Save offer data
         if: always()
         uses: actions/cache/save@v4
@@ -58,11 +72,11 @@ jobs:
 
       - name: Publish the shortlist
         run: |
-          mkdir -p out && cp data/shortlist-stellar.json out/
+          mkdir -p out && cp data/shortlist-*.json out/
           cd out
           git init -q -b shortlist
           git config user.name "lumoscore-scanner"
           git config user.email "180388645+RazaRizv1@users.noreply.github.com"
-          git add shortlist-stellar.json
+          git add shortlist-*.json
           git commit -q -m "shortlist $(date -u +%Y-%m-%dT%H:%MZ)"
           git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" shortlist
