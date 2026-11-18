@@ -1,0 +1,68 @@
+name: scan
+
+# Every 30 minutes: refresh the Stellar pools and order books, search for loops, and publish the shortlist to the
+# `shortlist` branch (overwritten each run, so the repository does not grow). The LumosCore MCP reads that file and
+# re-checks every candidate LIVE before reporting anything; this list only says where to look.
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  stellar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The offer book (~130 MB) lives in the build cache between runs, never in the repository.
+      - name: Restore offer data
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: stellar-data-${{ github.run_id }}
+          restore-keys: stellar-data-
+
+      # First run only: the full download (~70 minutes, ~4,800 requests at ~2,400 an hour per Horizon host).
+      - name: Bootstrap the offer book
+        run: |
+          mkdir -p data
+          if [ ! -s data/offers.jsonl ]; then node fetch-offers.mjs 4; fi
+
+      - name: Update offers (new + rolling sweep)
+        run: node update-offers.mjs 400
+
+      - name: Fetch pools
+        run: node fetch-pools.mjs
+
+      - name: Build the shortlist
+        run: node shortlist.mjs
+
+      - name: Save offer data
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data
+          key: stellar-data-${{ github.run_id }}
+
+      - name: Publish the shortlist
+        run: |
+          mkdir -p out && cp data/shortlist-stellar.json out/
+          cd out
+          git init -q -b shortlist
+          git config user.name "lumoscore-scanner"
+          git config user.email "180388645+RazaRizv1@users.noreply.github.com"
+          git add shortlist-stellar.json
+          git commit -q -m "shortlist $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" shortlist
