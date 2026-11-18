@@ -18,7 +18,7 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 200
     steps:
       - uses: actions/checkout@v4
 
@@ -49,11 +49,12 @@ jobs:
       - name: Build the shortlist
         run: node shortlist.mjs
 
-      # XRP Ledger: the AMM list (~330 pages from xrpl.to's public API) at most every 3 hours; order books every run.
+      # XRP Ledger: the AMM list (~330 pages from xrpl.to's public API, which throttles hard) is refreshed at most every
+      # 3 hours, 25 minutes a run, continuing across runs until complete; order books every run.
       - name: XRP Ledger pools (every 3 hours)
         continue-on-error: true
         run: |
-          if [ ! -s data/xrpl-pools.json ] || [ $(( $(date +%s) - $(stat -c %Y data/xrpl-pools.json) )) -gt 10800 ]; then node fetch-xrpl-pools.mjs; else echo "xrpl pools are fresh"; fi
+          if [ -s data/xrpl-pools-progress.json ] || [ ! -s data/xrpl-pools.json ] || [ $(( $(date +%s) - $(stat -c %Y data/xrpl-pools.json) )) -gt 10800 ]; then MAX_MIN=25 node fetch-xrpl-pools.mjs; else echo "xrpl pools are fresh"; fi
 
       - name: Build the XRP Ledger shortlist
         continue-on-error: true

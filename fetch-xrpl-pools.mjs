@@ -25,10 +25,18 @@ async function page(n) {
 // is under 6 hours old).
 const PROG = 'data/xrpl-pools-progress.json';
 const prev = fs.existsSync(PROG) ? JSON.parse(fs.readFileSync(PROG, 'utf8')) : null;
-const resume = prev && Date.now() - prev.at < 6 * 3600 * 1000;
+const resume = prev && Date.now() - prev.at < 24 * 3600 * 1000;
 const t0 = Date.now(); const pools = resume ? prev.pools : []; let total = Infinity, n = resume ? prev.next : 1;
 if (resume) console.log('resuming at page', n, 'with', pools.length, 'pools');
+// A TIME CAP PER RUN: xrpl.to throttles hard (measured ~18s a page from one IP, so 327 pages is 1.5-2 hours). A run
+// stops after MAX_MIN minutes, keeps its progress, and the next run continues; the previous complete list stays in use.
+const MAX_MIN = +(process.env.MAX_MIN || 0);
 while (n <= total) {
+  if (MAX_MIN && Date.now() - t0 > MAX_MIN * 60000) {
+    fs.writeFileSync(PROG, JSON.stringify({ at: resume ? prev.at : t0, next: n, pools }));
+    console.log(`time cap: stopped at page ${n} of ${total} with ${pools.length} pools; the next run continues`);
+    process.exit(0);
+  }
   const d = await page(n);
   total = +d.totalPages || 1;
   for (const p of d.pools || []) {
